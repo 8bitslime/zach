@@ -27,7 +27,9 @@ typedef unsigned int  zac_uint;
 
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 #ifndef zac_assert
 #define zac_assert(e, r) assert(e)
@@ -50,7 +52,7 @@ typedef unsigned int  zac_uint;
 #define Z(...)
 #endif
 
-//Resizeable arrays
+//Resizeable Arrays
 //std::vector replacement
 typedef struct zac_array {
 	int len, cap;
@@ -64,14 +66,15 @@ typedef struct zac_array {
 
 #define zac_array_resize(a, c) ((a) = zac_array__alloc((zac_array*)(a), zac_array_elem_size(a), c))
 #define zac_array_shrink(a)    (zac_array_resize(a, zac_array_len(a)))
+#define zac_array_empty(a)     (zac_array_head(a).len = 0)
 #define zac_array_free(a)      (zac_array_resize(a, 0))
 
 #define zac_array_hasSpace(a, n) (zac_array_cap(a) >= (zac_array_len(a) + (n)))
 #define zac_array_getSpace(a, n) ((zac_array_hasSpace(a, n) ? 0 : zac_array_resize(a, zac_array_len(a) + (n))), \
 								zac_array_head(a).len += (n), zac_array_end(a) - (n) + 1)
 
-#define zac_array_push(a, e) ((zac_array_hasSpace(a, 1) ? 0 : zac_array_resize(a, zac_array_len(a)*3/2+1)), \
-								zac_array_head(a).len++, *zac_array_end(a) = (e))
+#define zac_array_push(a, ...) ((zac_array_hasSpace(a, 1) ? 0 : zac_array_resize(a, zac_array_len(a)*3/2+1)), \
+								zac_array_head(a).len++, *zac_array_end(a) = (__VA_ARGS__))
 
 void *zac_array__alloc(zac_array *arr, int size, int cap) Z({
 	if (cap == 0) {
@@ -89,7 +92,7 @@ void *zac_array__alloc(zac_array *arr, int size, int cap) Z({
 });
 
 
-//Hash map (tbd)
+//Hash Map (tbd)
 typedef unsigned long zac_hash;
 
 zac_hash zac_hash_str(const char *str) Z({
@@ -168,6 +171,212 @@ int zac_io_readsb(char *buffer, int length, const char *fileName) Z({
 	
 // 	return len;
 // });
+
+//GL Utility Functions
+#ifdef ZAC_GL_UTIL
+
+typedef struct zac_vec2 {
+	float x, y;
+} zac_vec2;
+
+typedef struct zac_vec3 {
+	float x, y, z;
+} zac_vec3;
+
+typedef struct zac_gl_obj {
+	char *name;
+	zac_vec3 *vertices;
+	zac_vec2 *uvs;
+	zac_vec3 *normals;
+} zac_gl_obj;
+
+zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
+	char *file = zac_io_reads(fileName, NULL);
+	
+	if (file == NULL) {
+		return NULL;
+	}
+	
+	zac_gl_obj *out = NULL;
+	zac_gl_obj *curObj = zac_array_getSpace(out, 1);
+	curObj->name     = NULL;
+	curObj->vertices = NULL;
+	curObj->uvs      = NULL;
+	curObj->normals  = NULL;
+	
+	zac_vec3 *vertices = NULL;
+	zac_vec2 *uvs      = NULL;
+	zac_vec3 *normals  = NULL;
+	int *indices = NULL;
+	
+	int i = 0;
+	
+	while (file[i] != '\0') {
+		switch (file[i]) {
+			case 'o': {
+				//push object to return array
+				//Actually split by material, not object
+				if (curObj->name != NULL) {
+					curObj = zac_array_getSpace(out, 1);
+					curObj->name     = NULL;
+					curObj->vertices = NULL;
+					curObj->uvs      = NULL;
+					curObj->normals  = NULL;
+				}
+				int begin, end;
+				while (isspace(file[++i]));
+				begin = i;
+				while (file[i++] != '\n');
+				end = i - 1;
+				int length = end - begin;
+				
+				curObj->name = zac_malloc(sizeof(char) * length);
+				
+				if (curObj->name != NULL) {
+					strncpy(curObj->name, file + begin, length);
+					curObj->name[length] = '\0';
+				}
+				i += length;
+			}
+			break;
+			
+			case 'v': {
+				i++;
+				switch (file[i]) {
+					case ' ': { //vertex
+						zac_vec3 vec;
+						char *nextFloat;
+						vec.x = strtof(file + i, &nextFloat);
+						vec.y = strtof(nextFloat, &nextFloat);
+						vec.z = strtof(nextFloat, &nextFloat);
+						zac_array_push(vertices, vec);
+						i = nextFloat - file;
+					}
+					break;
+					
+					case 't': { //uv
+						i++;
+						zac_vec2 vec;
+						char *nextFloat;
+						vec.x = strtof(file + i, &nextFloat);
+						vec.y = strtof(nextFloat, &nextFloat);
+						zac_array_push(uvs, vec);
+						i = nextFloat - file;
+					}
+					break;
+					
+					case 'n': { //normal
+						i++;
+						zac_vec3 vec;
+						char *nextFloat;
+						vec.x = strtof(file + i, &nextFloat);
+						vec.y = strtof(nextFloat, &nextFloat);
+						vec.z = strtof(nextFloat, &nextFloat);
+						zac_array_push(normals, vec);
+						i = nextFloat - file;
+					}
+					break;
+				}
+			}
+			break;
+			
+			case 'f': {
+				i++;
+				char *nextInt = file + i;
+				int temp, current = 0;
+				while ((temp = strtol(nextInt, &nextInt, 10))) {
+					if (current >= 3) {
+						current = 0;
+					}
+					
+					temp = abs(temp);
+					
+					zac_array_push(indices, temp);
+					current++;
+					
+					if (isspace(nextInt[0]) || nextInt[0] == '\0') {
+						for (;current < 3; current++) {
+							zac_array_push(indices, 0);
+						}
+					} else if (nextInt[0] == '/' && nextInt[1] == '/') {
+						zac_array_push(indices, 0);
+						current++;
+						nextInt++;
+					}
+					nextInt++;
+				}
+				i = nextInt - file - 1;
+				
+				int count = zac_array_len(indices) / 3;
+				
+				if (count == 4) {
+					struct _index {
+						int vert, uv, norm;
+					};
+					
+					struct _index int_0 = ((struct _index*)indices)[0];
+					struct _index int_2 = ((struct _index*)indices)[2];
+					zac_array_push(indices, int_0.vert);
+					zac_array_push(indices, int_0.uv);
+					zac_array_push(indices, int_0.norm);
+					
+					zac_array_push(indices, int_2.vert);
+					zac_array_push(indices, int_2.uv);
+					zac_array_push(indices, int_2.norm);
+					
+				} else if (count > 4) {
+					//TODO: triangulate ngons
+					zac_array_empty(indices);
+					break;
+				}
+				
+				for (int j = 0; j < zac_array_len(indices); j+=3) {
+					int vert_int = indices[j + 0];
+					int uv_int   = indices[j + 1];
+					int norm_int = indices[j + 2];
+					
+					zac_array_push(curObj->vertices, vertices[vert_int - 1]);
+					
+					if (uv_int == 0) {
+						zac_array_push(curObj->uvs, (zac_vec2){0, 0});
+					} else {
+						zac_array_push(curObj->uvs, uvs[uv_int - 1]);
+					}
+					
+					if (norm_int == 0) {
+						//TODO: calculate normals
+						zac_array_push(curObj->normals, (zac_vec3){0, 0, 0});
+					} else {
+						zac_array_push(curObj->normals, normals[norm_int - 1]);
+					}
+				}
+				
+				zac_array_empty(indices);
+			}
+			break;
+		}
+		while (file[i++] != '\n');
+	}
+	
+	zac_array_free(vertices);
+	zac_array_free(uvs);
+	zac_array_free(normals);
+	zac_array_free(indices);
+	
+	zac_free(file);
+	return out;
+});
+void zac_gl_freeObj(zac_gl_obj *objs) Z({
+	for (int i = 0; i < zac_array_len(objs); i++) {
+		zac_free(objs[i].name);
+		zac_array_free(objs[i].vertices);
+		zac_array_free(objs[i].uvs);
+		zac_array_free(objs[i].normals);
+	}
+	zac_array_free(objs);
+});
+
+#endif
 
 #undef Z
 
