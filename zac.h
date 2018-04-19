@@ -190,12 +190,7 @@ typedef struct zac_gl_obj {
 	zac_vec3 *normals;
 } zac_gl_obj;
 
-zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
-	char *file = zac_io_reads(fileName, NULL);
-	
-	if (file == NULL) {
-		return NULL;
-	}
+zac_gl_obj *zac_gl_parseObjb(const char *buffer, int length) Z({
 	
 	zac_gl_obj *out = NULL;
 	zac_gl_obj *curObj = zac_array_getSpace(out, 1);
@@ -211,8 +206,8 @@ zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
 	
 	int i = 0;
 	
-	while (file[i] != '\0') {
-		switch (file[i]) {
+	while (i < length) {
+		switch (buffer[i]) {
 			case 'o': {
 				//push object to return array
 				//Actually split by material, not object
@@ -224,16 +219,16 @@ zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
 					curObj->normals  = NULL;
 				}
 				int begin, end;
-				while (isspace(file[++i]));
+				while (isspace(buffer[++i]));
 				begin = i;
-				while (file[i++] != '\n');
+				while (buffer[i++] != '\n');
 				end = i - 1;
 				int length = end - begin;
 				
 				curObj->name = zac_malloc(sizeof(char) * length);
 				
 				if (curObj->name != NULL) {
-					strncpy(curObj->name, file + begin, length);
+					strncpy(curObj->name, buffer + begin, length);
 					curObj->name[length] = '\0';
 				}
 				i += length;
@@ -242,15 +237,15 @@ zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
 			
 			case 'v': {
 				i++;
-				switch (file[i]) {
+				switch (buffer[i]) {
 					case ' ': { //vertex
 						zac_vec3 vec;
 						char *nextFloat;
-						vec.x = strtof(file + i, &nextFloat);
+						vec.x = strtof(buffer + i, &nextFloat);
 						vec.y = strtof(nextFloat, &nextFloat);
 						vec.z = strtof(nextFloat, &nextFloat);
 						zac_array_push(vertices, vec);
-						i = nextFloat - file;
+						i = nextFloat - buffer;
 					}
 					break;
 					
@@ -258,10 +253,10 @@ zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
 						i++;
 						zac_vec2 vec;
 						char *nextFloat;
-						vec.x = strtof(file + i, &nextFloat);
+						vec.x = strtof(buffer + i, &nextFloat);
 						vec.y = strtof(nextFloat, &nextFloat);
 						zac_array_push(uvs, vec);
-						i = nextFloat - file;
+						i = nextFloat - buffer;
 					}
 					break;
 					
@@ -269,11 +264,11 @@ zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
 						i++;
 						zac_vec3 vec;
 						char *nextFloat;
-						vec.x = strtof(file + i, &nextFloat);
+						vec.x = strtof(buffer + i, &nextFloat);
 						vec.y = strtof(nextFloat, &nextFloat);
 						vec.z = strtof(nextFloat, &nextFloat);
 						zac_array_push(normals, vec);
-						i = nextFloat - file;
+						i = nextFloat - buffer;
 					}
 					break;
 				}
@@ -282,7 +277,7 @@ zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
 			
 			case 'f': {
 				i++;
-				char *nextInt = file + i;
+				char *nextInt = buffer + i;
 				int temp, current = 0;
 				while ((temp = strtol(nextInt, &nextInt, 10))) {
 					if (current >= 3) {
@@ -305,7 +300,7 @@ zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
 					}
 					nextInt++;
 				}
-				i = nextInt - file - 1;
+				i = nextInt - buffer - 1;
 				
 				int count = zac_array_len(indices) / 3;
 				
@@ -355,7 +350,10 @@ zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
 			}
 			break;
 		}
-		while (file[i++] != '\n');
+		if (buffer[i] == '\0') {
+			break;
+		}
+		while (buffer[i++] != '\n');
 	}
 	
 	zac_array_free(vertices);
@@ -363,7 +361,18 @@ zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
 	zac_array_free(normals);
 	zac_array_free(indices);
 	
+	return out;
+});
+zac_gl_obj *zac_gl_parseObj(const char *fileName) Z({
+	int length;
+	char *file = zac_io_reads(fileName, &length);
+	if (length == -1) {
+		return NULL;
+	}
+	
+	zac_gl_obj *out = zac_gl_parseObjb(file, length);
 	zac_free(file);
+	
 	return out;
 });
 void zac_gl_freeObj(zac_gl_obj *objs) Z({
